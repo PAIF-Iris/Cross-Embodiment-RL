@@ -5,7 +5,7 @@ import numpy as np
 import pandas as pd
 import time
 
-path = "/Users/paif_iris/Desktop/metaworld/episode_000042.parquet"
+path = "/Users/paif_iris/Desktop/metaworld/episode_000049.parquet"
 df = pd.read_parquet(path)
 render_mode = 'human'
 env = gym.make('Meta-World/MT1', env_name="pick-place-v3", render_mode=render_mode, seed=42)
@@ -35,7 +35,7 @@ ISAAC_OBJ_INITIAL = np.array([
 ])
 
 # Compute initial relative position (EE - object) in Isaac Sim
-ISAAC_INITIAL_RELATIVE = ISAAC_OBJ_INITIAL - ISAAC_EE_INITIAL
+ISAAC_INITIAL_RELATIVE =17* (ISAAC_EE_INITIAL-  ISAAC_OBJ_INITIAL)
 print(f"Isaac Sim object initial: {ISAAC_OBJ_INITIAL}")
 print(f"Isaac Sim EE initial: {ISAAC_EE_INITIAL}")
 print(f"Isaac Sim initial relative (obj - EE): {ISAAC_INITIAL_RELATIVE}")
@@ -55,7 +55,8 @@ def map_gripper(gripper_raw):
     return gripper
 
 
-metaworld_ee_initial = METAWORLD_OBJ_INITIAL - ISAAC_INITIAL_RELATIVE
+metaworld_ee_initial = METAWORLD_OBJ_INITIAL + ISAAC_INITIAL_RELATIVE
+metaworld_ee_initial[2] -= 1
 print(f"Setting MetaWorld EE initial to: {metaworld_ee_initial}")
 
 env.unwrapped.hand_init_pos = np.array([
@@ -65,7 +66,7 @@ env.unwrapped.hand_init_pos = np.array([
 ])
 
 # 2. Reset environment (this applies hand_init_pos)
-obs, info = env.reset()
+#obs, info = env.reset()
 
 # 3. Verify EE position after reset
 metaworld_ee_after_reset = obs[0:3]
@@ -85,7 +86,6 @@ print(f"MetaWorld object current: {metaworld_obj_current}")
 
 print(f"Starting trajectory execution...")
 
-# ========== TRAJECTORY EXECUTION ==========
 for i in range(68):
     # Get Isaac Sim state at this timestep
     current_state = df['observation.state'].iloc[i]
@@ -96,7 +96,6 @@ for i in range(68):
     #     metaworld_obj_current = observation[4:7]
     #     print("observation:", metaworld_obj_current)
     metaworld_obj_current = METAWORLD_OBJ_INITIAL
-    print("observation:", metaworld_obj_current)
     
     # Extract current EE position in Isaac Sim
     isaac_ee_current = np.array([
@@ -117,10 +116,10 @@ for i in range(68):
     gripper_raw = action_7d[6]
     
     current_obs = env.unwrapped._get_obs()
-    metaworld_ee_current = current_obs[0:3]
+
     
-    isaac_current_relative = isaac_obj_current - isaac_ee_current
-    target_ee_position = metaworld_obj_current - metaworld_ee_current - isaac_current_relative
+    isaac_current_relative = isaac_ee_current - isaac_obj_current
+    target_ee_position = metaworld_obj_current + isaac_current_relative
     
     # Compute delta (action) for MetaWorld
     delta_xyz = target_ee_position - metaworld_ee_current
@@ -132,15 +131,27 @@ for i in range(68):
     gripper = map_gripper(gripper_raw)
     
     # Construct 4D action for MetaWorld
-    action_4d = np.array([delta_xyz[0], delta_xyz[1], delta_xyz[2], gripper], dtype=np.float32)
+    action_4d = np.array([17*delta_xyz[0], 17*delta_xyz[1], 17*delta_xyz[2], gripper], dtype=np.float32)
     
     print(f"Step {i}:")
     print(f"  Isaac EE: {isaac_ee_current}, obj: {isaac_obj_current}, relative: {isaac_current_relative}")
     print(f"  MetaWorld target: {target_ee_position}, current: {metaworld_ee_current}")
     print(f"  Action: {action_4d}")
 
+
+
+    # #Here's all that's needed
+    # action = df['action'].iloc[i]
+    # next_state = df['observation.state'].iloc[i+1]
+    # current_action = next_state[56:59] - current_state[56:59]
+    # action_4d = np.array([17*current_action[0], 17*current_action[1], 17*current_action[2],  map_gripper(action[6])], dtype=np.float32)
+
+
     # Step environment
     observation, reward, terminated, truncated, info = env.step(action_4d)
+    metaworld_ee_current = target_ee_position  # Update current EE position based on action
+    print("New Observation:", observation)
+    print("target position:", metaworld_ee_current)
     
     env.render()
     time.sleep(0.1)
