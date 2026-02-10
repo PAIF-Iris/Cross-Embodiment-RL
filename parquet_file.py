@@ -1,108 +1,142 @@
-# import pandas as pd
-# import numpy as np
-
-# PARQUET_PATH = "/Users/paif_iris/Desktop/metaworld/episode_000042.parquet"
-
-# # ---------------------------------------------------
-# # 1. Load parquet
-# # ---------------------------------------------------
-# df = pd.read_parquet(PARQUET_PATH)
-
-# print("\n=== BASIC INFO ===")
-# print("Number of rows (timesteps):", len(df))
-# print("Columns:\n", df.columns.tolist())
-
-# print("\n=== DATAFRAME INFO ===")
-# print(df.info())
-
-# # ---------------------------------------------------
-# # 2. Inspect each column: type + shape
-# # ---------------------------------------------------
-# print("\n=== COLUMN DETAILS ===")
-
-# for col in df.columns:
-#     sample = df[col].iloc[0]
-#     print(f"\nColumn: {col}")
-#     print("  Python type:", type(sample))
-
-#     if isinstance(sample, (list, tuple, np.ndarray)):
-#         arr = np.array(sample)
-#         print("  Shape:", arr.shape)
-#         print("  Dtype:", arr.dtype)
-#         print("  First 5 values:", arr.flatten()[:5])
-#     else:
-#         print("  Value:", sample)
-
-# # ---------------------------------------------------
-# # 3. Identify likely state / action columns
-# # ---------------------------------------------------
-# print("\n=== LIKELY MODALITIES ===")
-
-# for col in df.columns:
-#     name = col.lower()
-#     if "action" in name:
-#         print("Action column:", col)
-#     if "state" in name:
-#         print("State column:", col)
-#     if "image" in name or "camera" in name:
-#         print("Image column:", col)
-
-# # ---------------------------------------------------
-# # 4. Explicit checks for Meta-World layout
-# # ---------------------------------------------------
-# if "observation.state" in df.columns:
-#     state = np.array(df["observation.state"].iloc[0])
-#     print("\n=== OBSERVATION.STATE ===")
-#     print("State vector length:", state.shape)
-#     print("EE pos (0:3):", state[0:3])
-#     print("Gripper (3):", state[3])
-#     print("Object pos (4:7):", state[4:7])
-#     print("Object quat (7:11):", state[7:11])
-
-# if "action" in df.columns:
-#     action = np.array(df["action"].iloc[0])
-#     print("\n=== ACTION ===")
-#     print("Action shape:", action.shape)
-#     print("Action:", action)
-
-# # ---------------------------------------------------
-# # 5. Head & tail preview
-# # ---------------------------------------------------
-# print("\n=== FIRST 3 ROWS ===")
-# print(df.head(3))
-
-# print("\n=== LAST 3 ROWS ===")
-# print(df.tail(3))
-
-
-import pandas as pd
+import gymnasium as gym
+import metaworld
+import h5py
 import numpy as np
-import matplotlib.pyplot as plt
+import pandas as pd
+import time
+
+path = "/Users/paif_iris/Desktop/metaworld/episode_000042.parquet"
+df = pd.read_parquet(path)
+render_mode = 'human'
+env = gym.make('Meta-World/MT1', env_name="pick-place-v3", render_mode=render_mode, seed=42)
 
 
-PARQUET_PATH = "/Users/paif_iris/Desktop/metaworld/episode_000042.parquet"
+obs, info = env.reset()
 
-# ---------------------------------------------------
-# Load data
-# ---------------------------------------------------
-df = pd.read_parquet(PARQUET_PATH)
-states = np.stack(df["observation.state"].to_numpy())  # (T, 81)
+# ========== METAWORLD TARGET POSITIONS ==========
+METAWORLD_OBJ_INITIAL = np.array([0.0, 0.6, 0.02])  # Fixed object position in MetaWorld
 
-T, D = states.shape
-timesteps = np.arange(T)
+# ========== ISAAC SIM INITIAL STATE (from first frame) ==========
+# Extract initial state from first row of parquet
+first_state = df['observation.state'].iloc[0]
 
-print(f"Loaded {T} timesteps, {D} state dimensions")
+# EE position is at indices 54:57 based on the schema
+ISAAC_EE_INITIAL = np.array([
+    first_state[56],  # eef_pos_x
+    first_state[57],  # eef_pos_y
+    first_state[58]   # eef_pos_z
+])
 
-# ---------------------------------------------------
-# Plot all dimensions
-# ---------------------------------------------------
-plt.figure(figsize=(14, 6))
+# Object position - using box0 (indices 0:3)
+ISAAC_OBJ_INITIAL = np.array([
+    first_state[0],   # box0_pos_x
+    first_state[1],   # box0_pos_y
+    first_state[2]    # box0_pos_z
+])
 
-for d in range(D):
-    plt.plot(timesteps, states[:, d], alpha=0.4)
+# Compute initial relative position (EE - object) in Isaac Sim
+ISAAC_INITIAL_RELATIVE = ISAAC_EE_INITIAL - ISAAC_OBJ_INITIAL
+print(f"Isaac Sim object initial: {ISAAC_OBJ_INITIAL}")
+print(f"Isaac Sim EE initial: {ISAAC_EE_INITIAL}")
+print(f"Isaac Sim initial relative (EE - obj): {ISAAC_INITIAL_RELATIVE}")
 
-plt.xlabel("Timestep")
-plt.ylabel("State value")
-plt.title("observation.state (all dimensions)")
-plt.tight_layout()
-plt.show()
+def map_gripper(gripper_raw):
+    """
+    Convert Isaac Sim gripper value to MetaWorld's binary gripper.
+    MetaWorld: -1 = close, 1 = open
+    Isaac Sim: gripper > 0 means open, gripper < 0 means close
+    """
+    if gripper_raw > 0:
+        return -1.0  # Open gripper
+    else:
+        return 1.0   # Close gripper
+
+
+metaworld_ee_initial = METAWORLD_OBJ_INITIAL + ISAAC_INITIAL_RELATIVE
+print(f"Setting MetaWorld EE initial to: {metaworld_ee_initial}")
+
+env.unwrapped.hand_init_pos = np.array([
+    metaworld_ee_initial[0],
+    metaworld_ee_initial[1],
+    metaworld_ee_initial[2]
+])
+
+# 2. Reset environment (this applies hand_init_pos)
+obs, info = env.reset()
+
+# 3. Verify EE position after reset
+metaworld_ee_after_reset = obs[0:3]
+print(f"MetaWorld EE after reset: {metaworld_ee_after_reset}")
+
+# 4. Set object to fixed position
+env.unwrapped._set_obj_xyz(METAWORLD_OBJ_INITIAL)
+print(f"MetaWorld object set to: {METAWORLD_OBJ_INITIAL}")
+
+# 5. Refresh observation after setting object
+obs = env.unwrapped._get_obs()
+metaworld_ee_current = obs[0:3]
+# TODO: Verify the correct index for object position in MetaWorld obs
+metaworld_obj_current = obs[4:7]  # This may need adjustment
+print(f"MetaWorld EE current: {metaworld_ee_current}")
+print(f"MetaWorld object current: {metaworld_obj_current}")
+
+print(f"Starting trajectory execution...")
+
+# ========== TRAJECTORY EXECUTION ==========
+for i in range(68):
+    # Get Isaac Sim state at this timestep
+    current_state = df['observation.state'].iloc[i]
+    metaworld_obj_current = obs[4:7]
+    
+    # Extract current EE position in Isaac Sim
+    isaac_ee_current = np.array([
+        current_state[56],  # eef_pos_x
+        current_state[57],  # eef_pos_y
+        current_state[58]   # eef_pos_z
+    ])
+    
+    # Extract current object position in Isaac Sim
+    isaac_obj_current = np.array([
+        current_state[0],   # box0_pos_x
+        current_state[1],   # box0_pos_y
+        current_state[2]    # box0_pos_z
+    ])
+    
+    # Extract gripper action
+    action_7d = df['action'].iloc[i]
+    gripper_raw = action_7d[6]
+    
+
+    isaac_current_relative = isaac_ee_current - isaac_obj_current
+    target_ee_position = metaworld_obj_current + isaac_current_relative
+    
+    # Get current MetaWorld EE position from observation
+    current_obs = env.unwrapped._get_obs()
+    metaworld_ee_current = current_obs[0:3]
+    
+    # Compute delta (action) for MetaWorld
+    delta_xyz = target_ee_position - metaworld_ee_current
+    
+    # Clip deltas to valid range
+    delta_xyz = np.clip(delta_xyz, -1.0, 1.0)
+    
+    # Get gripper action
+    gripper = map_gripper(gripper_raw)
+    
+    # Construct 4D action for MetaWorld
+    action_4d = np.array([delta_xyz[0], delta_xyz[1], delta_xyz[2], gripper], dtype=np.float32)
+    
+    if i % 10 == 0:  # Print every 10 steps to reduce clutter
+        print(f"Step {i}:")
+        print(f"  Isaac EE: {isaac_ee_current}, obj: {isaac_obj_current}, relative: {isaac_current_relative}")
+        print(f"  MetaWorld target: {target_ee_position}, current: {metaworld_ee_current}")
+        print(f"  Action: {action_4d}")
+    
+    # Step environment
+    observation, reward, terminated, truncated, info = env.step(action_4d)
+    
+    env.render()
+    time.sleep(0.1)
+
+env.close()
+print("Trajectory execution complete!")

@@ -66,62 +66,6 @@ def map_action_7d_to_4d(action_7d, scale_position=10):
 # s_y = 0.044000 / 0.254885 = 0.1726
 # s roughly 0.17
 
-
-
-# s = 0.17
-
-# observation, info = env.reset()
-# start_ee_pos = observation[0:3]
-# x =  s*(0.486089 - 0.378831) + start_ee_pos[0]
-# y =  s*(0.27058 - 0.015589) + start_ee_pos[1]
-# z = s*(-0.005 - 0.684344) + start_ee_pos[2]
-# print("Setting object to:", x, y, z)
-# env.unwrapped._set_obj_xyz(np.array([x, y, 0.02]))  # (-0.6~0.6, 0.35~0.95, 0.02)
-# print("Original hand_init_pos:", env.unwrapped.hand_init_pos)
-# env.unwrapped.hand_init_pos = np.array([
-#     env.unwrapped.hand_init_pos[0],
-#     env.unwrapped.hand_init_pos[1],
-#     0.1   # your desired lower Z
-# ])
-# print("Modified hand_init_pos:", env.unwrapped.hand_init_pos)
-# # observation[2] -= 0.01
-# # start_ee_pos = observation[0:3]
-# # obs, info = env.reset()
-# print("Start end-effector XYZ:", start_ee_pos)
-
-
-
-# # s = 1
-
-# # x = 0-(0.486089 - 0.378831)
-# # y = 0.6-(0.27058  - 0.015589)
-# # z = 0.02-( -0.005 - 0.684344)
-
-# env.unwrapped.hand_init_pos = np.array([
-#     x,
-#     y,
-#     z
-# ])
-# print("end-effector start", x, y, z)
-
-# obs, info = env.reset()
-# start_ee_pos = obs[0:3]
-
-# print("EE start after reset:", start_ee_pos)
-
-# #3. Compute object position RELATIVE to EE
-# x = start_ee_pos[0] + s * (0.486089 - 0.378831)
-# y = start_ee_pos[1] + s * (0.27058  - 0.015589)
-
-
-# #4. Set object AFTER reset
-# env.unwrapped._set_obj_xyz(np.array([x, y, 0.02]))
-
-# #env.unwrapped._set_obj_xyz(np.array([0, 0.6, 0.02]))
-
-
-# print("Setting object to:", x, y)
-
 s = 0.17
 
 # 1. Set EE start BEFORE reset
